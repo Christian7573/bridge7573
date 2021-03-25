@@ -1,0 +1,15 @@
+[package]
+name = "bridge7573"
+version = "0.1.0"
+authors = ["Christian7573 <cag4561@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-std = { version = "1.9.0", features = ["attributes", "unstable"] }
+async-tungstenite = { version = "0.13.1", features = ["async-tls", "async-std-runtime"] }
+lazy_static = "1.4.0"
+serde = "1.0.125"
+serde_json = "1.0.64"
+surf = { version = "2.2.0", features = ["hyper-client"] }
