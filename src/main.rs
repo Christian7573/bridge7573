@@ -1,10 +1,15 @@
 use async_std::sync::Mutex;
 use serde::{Serialize, Deserialize};
 use http_types::headers::HeaderValues;
+use serde_json::Value as JsValue;
+
+mod multi_recv;
+use multi_recv::*;
 
 pub struct Global {
     guilded_cookies: HeaderValues,
-
+    from_guilded: MultiRecv<JsValue>,
+    from_discord: MultiRecv<JsValue>,
 }
 const GUILDED_API: &'static str = "https://www.guilded.gg/api";
 
