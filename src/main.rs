@@ -4,7 +4,9 @@ use http_types::headers::HeaderValues;
 use serde_json::Value as JsValue;
 
 mod multi_recv;
+mod error_boxable;
 use multi_recv::*;
+use error_boxable::*;
 
 pub struct Global {
     guilded_cookies: HeaderValues,
@@ -36,17 +38,3 @@ async fn authenticate_guilded(guilded_email: &str, guilded_password: &str) -> Re
     Ok(res.header("Set-Cookie").map(|values| values.clone()).ok_or("authenticate_guilded no set-cookie".to_owned())?)
 }
 
-trait ErrorBoxable: std::fmt::Debug + std::fmt::Display {}
-impl ErrorBoxable for surf::Error {}
-impl ErrorBoxable for String {}
-struct ErrorBox(Box<dyn ErrorBoxable>);
-impl std::fmt::Display for ErrorBox {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> { self.0.fmt(f) }
-}
-impl std::fmt::Debug for ErrorBox {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> { self.0.fmt(f) }
-}
-impl<T: ErrorBoxable + 'static> From<T> for ErrorBox {
-    fn from(other: T) -> ErrorBox { ErrorBox(Box::new(other)) }
-}
-fn errorbox<T: ErrorBoxable + 'static >(err: T) -> ErrorBox { ErrorBox::from(err) }
