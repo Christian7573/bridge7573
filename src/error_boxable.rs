@@ -1,6 +1,7 @@
 pub trait ErrorBoxable: std::fmt::Debug + std::fmt::Display {}
 impl ErrorBoxable for surf::Error {}
 impl ErrorBoxable for String {}
+impl ErrorBoxable for async_tungstenite::tungstenite::Error {}
 pub struct ErrorBox(Box<dyn ErrorBoxable>);
 impl std::fmt::Display for ErrorBox {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> { self.0.fmt(f) }

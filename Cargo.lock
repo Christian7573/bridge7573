@@ -300,6 +300,7 @@ dependencies = [
  "async-std",
  "async-tungstenite",
  "futures",
+ "http",
  "http-types",
  "lazy_static",
  "serde",
