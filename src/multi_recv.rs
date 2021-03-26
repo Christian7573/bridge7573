@@ -15,25 +15,27 @@ impl<T> MultiRecv<T> where T: Sync + std::marker::Send + 'static {
         let (new_receivers, mut receive_new_receivers) = unbounded::<Sender<Arc<T>>>();
         spawn(async move {
             let mut receivers = Vec::new();
-            futures::select_biased! {
-                new_receiver = receive_new_receivers.next().fuse() => {
-                    if let Some(new_receiver) = new_receiver {
-                        receivers.push(new_receiver);
-                    }
-                },
-                new_msg = origional_receiver.next().fuse() => {
-                    if let Some(new_msg) = new_msg {
-                        let new_msg = Arc::new(new_msg);
-                        let mut i = 0;
-                        while i < receivers.len() {
-                            if let Err(_) = receivers[i].send(new_msg.clone()).await {
-                                receivers.remove(i);
-                            } else {
-                                i += 1;
-                            }
+            loop {
+                futures::select_biased! {
+                    new_receiver = receive_new_receivers.next().fuse() => {
+                        if let Some(new_receiver) = new_receiver {
+                            receivers.push(new_receiver);
                         }
-                    } else {
-                        return;
+                    },
+                    new_msg = origional_receiver.next().fuse() => {
+                        if let Some(new_msg) = new_msg {
+                            let new_msg = Arc::new(new_msg);
+                            let mut i = 0;
+                            while i < receivers.len() {
+                                if let Err(_) = receivers[i].send(new_msg.clone()).await {
+                                    receivers.remove(i);
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                        } else {
+                            return;
+                        }
                     }
                 }
             }
