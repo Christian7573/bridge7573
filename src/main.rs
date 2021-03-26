@@ -7,21 +7,17 @@ use async_tungstenite::tungstenite::Message;
 use async_tungstenite::WebSocketStream;
 use async_std::channel::{Sender, unbounded};
 use futures::{StreamExt, SinkExt, FutureExt};
+use async_std::future::timeout;
+use std::time::Duration;
 
 mod multi_recv;
 mod error_boxable;
 use multi_recv::*;
 use error_boxable::*;
 
-pub struct Global {
-    guilded_cookies: HeaderValues,
-    from_guilded: MultiRecv<JsValue>,
-    //from_discord: MultiRecv<JsValue>,
-}
-const GUILDED_API: &'static str = "https://www.guilded.gg/api";
+mod guilded_to_discord;
 
-static mut GLOBAL_RAW: Option<Global> = None;
-fn global() -> &'static mut Global { unsafe { GLOBAL_RAW.as_mut().unwrap() } }
+const GUILDED_API: &'static str = "https://www.guilded.gg/api";
 
 #[async_std::main]
 async fn main() {
@@ -30,8 +26,17 @@ async fn main() {
     let discord_auth_header = std::env::var("discord_auth").expect("No discord_auth env variable");
 
     let guilded_cookies = authenticate_guilded(&guilded_email, &guilded_password).await.expect("Failed to authenticate");
-    let (_to_guilded, mut from_guilded) = guilded_websocket(guilded_cookies.clone()).await.expect("Died while connecting to guilded");
-    println!("{:?}", from_guilded.next().await);
+    let (to_guilded, from_guilded) = guilded_websocket(guilded_cookies.clone()).await.expect("Died while connecting to guilded");
+    let to_guilded_heartbeat = to_guilded.clone();
+    async_std::task::spawn(async move {
+        while let Ok(_) = timeout(Duration::from_secs(24), to_guilded_heartbeat.send(Message::Text("2".to_owned()))).await {};
+        eprintln!("Guilded heartbeat died");
+        std::process::exit(1);
+    });
+
+    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone());
+
+    futures::future::pending().await
 }
 
 async fn authenticate_guilded(guilded_email: &str, guilded_password: &str) -> Result<HeaderValues, ErrorBox> {
@@ -84,7 +89,7 @@ fn my_ws_task<S: futures::AsyncRead + futures::AsyncWrite + Unpin + Send + 'stat
                 },
                 send_msg = msgs_to_send.next().fuse() => {
                     if let Some(msg) = send_msg {
-                        if let Err(err) = ws.feed(msg).await {
+                        if let Err(err) = ws.send(msg).await {
                             eprintln!("Died while send_msg: {:?}", err);
                             std::process::exit(1);
                         }
