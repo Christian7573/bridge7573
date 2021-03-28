@@ -7,7 +7,6 @@ use async_tungstenite::tungstenite::Message;
 use async_tungstenite::WebSocketStream;
 use async_std::channel::{Sender, unbounded};
 use futures::{StreamExt, SinkExt, FutureExt};
-use async_std::future::timeout;
 use std::time::Duration;
 
 mod multi_recv;
@@ -29,12 +28,14 @@ async fn main() {
     let (to_guilded, from_guilded) = guilded_websocket(guilded_cookies.clone()).await.expect("Died while connecting to guilded");
     let to_guilded_heartbeat = to_guilded.clone();
     async_std::task::spawn(async move {
-        while let Ok(_) = timeout(Duration::from_secs(24), to_guilded_heartbeat.send(Message::Text("2".to_owned()))).await {};
+        while let Ok(_) = to_guilded_heartbeat.send(Message::Text("2".to_owned())).await {
+            async_std::task::sleep(Duration::from_secs(24)).await;
+        };
         eprintln!("Guilded heartbeat died");
         std::process::exit(1);
     });
 
-    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone());
+    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone()).await;
 
     futures::future::pending().await
 }
@@ -53,7 +54,7 @@ async fn guilded_websocket(guilded_cookies: HeaderValues) -> Result<(Sender<Mess
     let request = guilded_cookies.iter().fold(
         http::Request::builder()
             .uri(format!("wss://api.guilded.gg/socket.io/?jwt=undefined&EIO=3&transport=websocket")),
-        |request, value| request.header("Set-Cookie", value.as_str().to_owned())
+        |request, value| request.header("Cookie", value.as_str().to_owned())
     ).body(()).unwrap();
     let (ws, _response) = async_tungstenite::async_std::connect_async(request).await?;
     Ok(my_ws_task(ws))
