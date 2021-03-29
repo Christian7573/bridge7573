@@ -120,3 +120,13 @@ async fn chat_message_created(msg: ChatMessageCreated, config: Arc<Config>, data
     extract_text_from_node(&msg.message.content.document, &mut content);
     println!("{}", content);
 }
+
+async fn get_webhook<'a>(for_user: &str, for_channel: &str, data: &'a mut Data) -> &'a str {
+    //Get from database
+    if data.webhooks.get(for_channel).is_none() { data.webhooks.insert(for_channel.to_owned(), BTreeMap::new()); }
+    let channel = data.webhooks.get_mut(for_channel).unwrap();
+    if let Some(webhook) = channel.get(for_user) { return webhook };
+
+    //Create with discord
+    todo!()
+}

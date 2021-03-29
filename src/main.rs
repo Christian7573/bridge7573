@@ -39,7 +39,7 @@ async fn main() {
         std::process::exit(1);
     });
 
-    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone()).await;
+    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone(), config.clone()).await;
 
     futures::future::pending().await
 }
