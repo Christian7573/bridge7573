@@ -8,6 +8,7 @@ use async_tungstenite::WebSocketStream;
 use async_std::channel::{Sender, unbounded};
 use futures::{StreamExt, SinkExt, FutureExt};
 use std::time::Duration;
+use std::sync::Arc;
 
 mod multi_recv;
 mod error_boxable;
@@ -18,7 +19,16 @@ use config::*;
 
 mod guilded_to_discord;
 
-const GUILDED_API: &'static str = "https://www.guilded.gg/api";
+struct Environment {
+    guilded_email: String,
+    guilded_password: String,
+    discord_auth_header: String,
+    guilded_cookies: HeaderValues,
+    config: Config,
+}
+
+pub const GUILDED_API: &'static str = "https://www.guilded.gg/api";
+pub const DISCORD_API: &'static str = "https://www.discord.com/api/v8";
 
 #[async_std::main]
 async fn main() {
@@ -39,7 +49,11 @@ async fn main() {
         std::process::exit(1);
     });
 
-    guilded_to_discord::guilded_to_discord(guilded_cookies, from_guilded.clone(), config.clone()).await;
+    let env = Arc::new(Environment {
+        guilded_email, guilded_password, discord_auth_header, config, guilded_cookies    
+    });
+
+    guilded_to_discord::guilded_to_discord(env.clone(), from_guilded.clone()).await;
 
     futures::future::pending().await
 }

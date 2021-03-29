@@ -9,10 +9,10 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load_blocking() -> Arc<Config> {
+    pub fn load_blocking() -> Config {
         let mut string_cause_yes = String::new();
         File::open("config.json").expect("No config.json").read_to_string(&mut string_cause_yes).expect("Died while reading config.json");
-        Arc::new(serde_json::from_str(&string_cause_yes).expect("Invalid config.json"))                                
+        serde_json::from_str(&string_cause_yes).expect("Invalid config.json")
     }
 }
 

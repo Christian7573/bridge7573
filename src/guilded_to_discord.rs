@@ -11,7 +11,7 @@ use async_std::fs::File;
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
 
-use crate::config::*;
+use crate::*;
 
 const DATA_FILE: &'static str = "gd_data.json";
 #[derive(Serialize, Deserialize, Default)]
@@ -25,7 +25,7 @@ impl Data {
     }
 }
 
-pub async fn guilded_to_discord(guilded_cookies: HeaderValues, mut from_guilded: MultiRecv<WsMessage>, config: Arc<Config>) -> async_std::task::JoinHandle<()> {
+pub async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRecv<WsMessage>) -> async_std::task::JoinHandle<()> {
     let mut data = Data::default();
     if let Ok(data_file) = File::open(DATA_FILE).await {
         let mut data_dat = String::new();
@@ -47,7 +47,7 @@ pub async fn guilded_to_discord(guilded_cookies: HeaderValues, mut from_guilded:
                             if let JsValue::String(msg_type) = &contents[0] {
                                 match &**msg_type {
                                     "ChatMessageCreated" => {
-                                        if let Ok(msg) = ChatMessageCreated::deserialize(&contents[1]) { chat_message_created(msg, &config, &mut data).await };
+                                        if let Ok(msg) = ChatMessageCreated::deserialize(&contents[1]) { chat_message_created(&env, &mut data, msg).await };
                                     },
                                     _ => (),
                                 }
@@ -115,18 +115,20 @@ fn extract_text_from_node(node: &JsValue, out: &mut String) {
 }
 
 
-async fn chat_message_created(msg: ChatMessageCreated, config: Arc<Config>, data: &mut Data) {
+async fn chat_message_created(env: &Arc<Environment>, data: &mut Data, msg: ChatMessageCreated) {
     let mut content = String::new();
     extract_text_from_node(&msg.message.content.document, &mut content);
     println!("{}", content);
 }
 
-async fn get_webhook<'a>(for_user: &str, for_channel: &str, data: &'a mut Data) -> &'a str {
+async fn get_webhook<'a>(data: &'a mut Data, guilded_user: &str, discord_channel: &str) -> &'a str {
     //Get from database
-    if data.webhooks.get(for_channel).is_none() { data.webhooks.insert(for_channel.to_owned(), BTreeMap::new()); }
-    let channel = data.webhooks.get_mut(for_channel).unwrap();
-    if let Some(webhook) = channel.get(for_user) { return webhook };
+    if data.webhooks.get(discord_channel).is_none() { data.webhooks.insert(discord_channel.to_owned(), BTreeMap::new()); }
+    let channel = data.webhooks.get_mut(discord_channel).unwrap();
+    if let Some(webhook) = channel.get(guilded_user) { return webhook };
 
     //Create with discord
+    //surf::post(format!("{}/channels/{}/webhooks", DISCORD_API, discord_channel))
+        
     todo!()
 }
