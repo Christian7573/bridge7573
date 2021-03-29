@@ -11,8 +11,10 @@ use std::time::Duration;
 
 mod multi_recv;
 mod error_boxable;
+mod config;
 use multi_recv::*;
 use error_boxable::*;
+use config::*;
 
 mod guilded_to_discord;
 
@@ -23,6 +25,8 @@ async fn main() {
     let guilded_email = std::env::var("guilded_email").expect("No guilded_email env variable");
     let guilded_password = std::env::var("guilded_password").expect("No guilded_password env variable");
     let discord_auth_header = std::env::var("discord_auth").expect("No discord_auth env variable");
+
+    let config = Config::load_blocking();
 
     let guilded_cookies = authenticate_guilded(&guilded_email, &guilded_password).await.expect("Failed to authenticate");
     let (to_guilded, from_guilded) = guilded_websocket(guilded_cookies.clone()).await.expect("Died while connecting to guilded");
