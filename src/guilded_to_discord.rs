@@ -121,14 +121,40 @@ async fn chat_message_created(env: &Arc<Environment>, data: &mut Data, msg: Chat
     println!("{}", content);
 }
 
-async fn get_webhook<'a>(data: &'a mut Data, guilded_user: &str, discord_channel: &str) -> &'a str {
+async fn get_webhook<'a>(env: &Arc<Environment>, data: &'a mut Data, guilded_user: &str, discord_channel: &str) -> Result<&'a str, ErrorBox> {
     //Get from database
     if data.webhooks.get(discord_channel).is_none() { data.webhooks.insert(discord_channel.to_owned(), BTreeMap::new()); }
     let channel = data.webhooks.get_mut(discord_channel).unwrap();
-    if let Some(webhook) = channel.get(guilded_user) { return webhook };
+    if let Some(webhook) = channel.get(guilded_user) { return Ok(webhook) };
+
+    #[derive(Serialize, Deserialize)]
+    struct UserData {
+        name: String,
+        #[serde(rename = "profilePictureSm")]
+        avatar: Option<String>,
+    }
+
+    //Get user data
+    let mut user_response = surf::get(format!("{}/users/{}", GUILDED_API, guilded_user))
+        .header("Cookie", &env.guilded_cookies)
+        .send().await?;
+    if !user_response.status().is_success() { return Err(format!("GD Make Webhook: Failed to fetch guilded user {}: {}", guilded_user, user_response.status()).into()) };
+    let user = user_response.body_json::<UserData>().await?;
+    let avatar = if let Some(avatar) = &user.avatar {
+        let avatar_data = surf::get(avatar)
+            .header("Cookie", &env.guilded_cookies)
+            .send().await?;
+
+    } else { None };
+
+    struct CreateWebhook {
+                
+    }
 
     //Create with discord
-    //surf::post(format!("{}/channels/{}/webhooks", DISCORD_API, discord_channel))
+    /*let response = surf::post(format!("{}/channels/{}/webhooks", DISCORD_API, discord_channel))
+        .header("Authorization", env.discord_auth_header)
+        .body().await;*/
         
     todo!()
 }
