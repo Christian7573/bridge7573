@@ -10,6 +10,7 @@ use std::sync::Arc;
 use async_std::fs::File;
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
+use surf::Body;
 
 use crate::*;
 
@@ -25,9 +26,9 @@ impl Data {
     }
 }
 
-pub async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRecv<WsMessage>) -> async_std::task::JoinHandle<()> {
+pub(crate) async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRecv<WsMessage>) -> async_std::task::JoinHandle<()> {
     let mut data = Data::default();
-    if let Ok(data_file) = File::open(DATA_FILE).await {
+    if let Ok(mut data_file) = File::open(DATA_FILE).await {
         let mut data_dat = String::new();
         if let Ok(_) = data_file.read_to_string(&mut data_dat).await {
             if let Ok(data_parsed) = deserialize(&data_dat) {
@@ -39,6 +40,7 @@ pub async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRe
 
     async_std::task::spawn(async move {
         while let Some(msg) = from_guilded.next().await {
+            println!("Hallo first");
             if let WsMessage::Text(msg) = &*msg {
                 if print_all_msg { println!("{}", msg) };
                 if let Some(json_begin_at) = msg.find('[') {
@@ -47,7 +49,10 @@ pub async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRe
                             if let JsValue::String(msg_type) = &contents[0] {
                                 match &**msg_type {
                                     "ChatMessageCreated" => {
-                                        if let Ok(msg) = ChatMessageCreated::deserialize(&contents[1]) { chat_message_created(&env, &mut data, msg).await };
+                                        match ChatMessageCreated::deserialize(&contents[1]) {
+                                            Ok(msg) => { chat_message_created(&env, &mut data, msg).await },
+                                            Err(err) => { eprintln!("Failed to deserialize ChatMessageCreated\n{}", err); },
+                                        }
                                     },
                                     _ => (),
                                 }
@@ -116,17 +121,47 @@ fn extract_text_from_node(node: &JsValue, out: &mut String) {
 
 
 async fn chat_message_created(env: &Arc<Environment>, data: &mut Data, msg: ChatMessageCreated) {
+    let discord_channel = if let Some(c) = get_linked_discord_channel(env, data, &msg.channel_id) { c } else { return };
     let mut content = String::new();
     extract_text_from_node(&msg.message.content.document, &mut content);
-    println!("{}", content);
+    let webhook = match get_webhook(env, data, &msg.author, &discord_channel).await {
+        Ok(w) => w, 
+        Err(err) => { eprintln!("GD Chat Message Get Webhook: {:?}", err); return; }
+    };
+    
+    #[derive(Serialize, Deserialize)]
+    struct WebhookMessage {
+        content: String,
+    }
+    let body = WebhookMessage {
+        content
+    };
+    let response = surf::post(webhook)
+        .header("Content-Type", "application/json")
+        .body(Body::from_json(&body).expect("How did we get here")).await;
+    match response {
+        Ok(response) => {
+            if !response.status().is_success() { eprintln!("GD Chat Message Message for user {} was not success: {}", msg.author, response.status()) };
+            //Woo guess it worked lol
+        },
+        Err(err) => { eprintln!("GD Chat Mesage Send Message: {:?}", err); return; }
+    }
 }
 
-async fn get_webhook<'a>(env: &Arc<Environment>, data: &'a mut Data, guilded_user: &str, discord_channel: &str) -> Result<&'a str, ErrorBox> {
+fn get_linked_discord_channel<'e>(env: &'e Arc<Environment>, _data: &mut Data, guilded_channel: &str) -> Option<&'e str> {
+    env.config.text_channel_gd.get(guilded_channel).map(|s| &**s)    
+}
+
+async fn get_webhook<'d>(env: &Arc<Environment>, data: &'d mut Data, guilded_user: &str, discord_channel: &str) -> Result<String, ErrorBox> {
     //Get from database
     if data.webhooks.get(discord_channel).is_none() { data.webhooks.insert(discord_channel.to_owned(), BTreeMap::new()); }
     let channel = data.webhooks.get_mut(discord_channel).unwrap();
-    if let Some(webhook) = channel.get(guilded_user) { return Ok(webhook) };
+    if let Some(webhook) = channel.get(guilded_user) { return Ok(webhook.to_owned()) };
 
+    #[derive(Serialize, Deserialize)]
+    struct UserResponse {
+        user: UserData,
+    }
     #[derive(Serialize, Deserialize)]
     struct UserData {
         name: String,
@@ -139,22 +174,41 @@ async fn get_webhook<'a>(env: &Arc<Environment>, data: &'a mut Data, guilded_use
         .header("Cookie", &env.guilded_cookies)
         .send().await?;
     if !user_response.status().is_success() { return Err(format!("GD Make Webhook: Failed to fetch guilded user {}: {}", guilded_user, user_response.status()).into()) };
-    let user = user_response.body_json::<UserData>().await?;
+    let user = user_response.body_json::<UserResponse>().await?.user;
     let avatar = if let Some(avatar) = &user.avatar {
-        let avatar_data = surf::get(avatar)
+        let mut avatar_response = surf::get(avatar)
             .header("Cookie", &env.guilded_cookies)
             .send().await?;
-
+        if let Some(header) = avatar_response.header("Content-Type").map(|res| res[0].to_string()) {
+            Some(format!("data:{};base64,{}", header, base64::encode(avatar_response.body_bytes().await?)))
+        } else {
+            return Err(format!("GD Make Webhook: Failed to fetch avatar for guilded user {}: {}", guilded_user, avatar_response.status()).into())
+        }
     } else { None };
 
-    struct CreateWebhook {
-                
-    }
-
     //Create with discord
-    /*let response = surf::post(format!("{}/channels/{}/webhooks", DISCORD_API, discord_channel))
-        .header("Authorization", env.discord_auth_header)
-        .body().await;*/
-        
-    todo!()
+    #[derive(Serialize, Deserialize)]
+    struct CreateWebhook {
+        name: String,
+        avatar: Option<String>
+    }
+    #[derive(Serialize, Deserialize)]
+    struct WebhookResponse {
+        id: String,
+        token: String,
+    }
+    let body = CreateWebhook {
+        name: format!("📀 {}", user.name),
+        avatar
+    };
+    let mut response = surf::post(format!("{}/channels/{}/webhooks", DISCORD_API, discord_channel))
+        .header("Authorization", &env.discord_auth_header)
+        .body(Body::from_json(&body)?).await?;
+    if !response.status().is_success() { return Err (format!("GD Make Webhook: Webhook creation response for guilded user {} is not success: {}", guilded_user, response.status()).into()) };
+    let created_webhook = response.body_json::<WebhookResponse>().await?;
+
+    let webhook = format!("https://discord.com/api/webhooks/{}/{}", created_webhook.id, created_webhook.token);
+    data.webhooks.get_mut(discord_channel).unwrap().insert(guilded_user.to_owned(), webhook.clone());        
+    data.save().await;
+    Ok(webhook)
 }

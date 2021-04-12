@@ -28,7 +28,7 @@ struct Environment {
 }
 
 pub const GUILDED_API: &'static str = "https://www.guilded.gg/api";
-pub const DISCORD_API: &'static str = "https://www.discord.com/api/v8";
+pub const DISCORD_API: &'static str = "https://discord.com/api/v8";
 
 #[async_std::main]
 async fn main() {
