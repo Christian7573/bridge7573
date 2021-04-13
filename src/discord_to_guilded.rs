@@ -122,7 +122,7 @@ async fn get_webhook(env: &Arc<Environment>, data: &mut Data, user: &DiscordUser
     }
     let body = CreateWebhookBody {
         channel: guilded_channel.to_owned(),
-        name: user.username.to_owned(),
+        name: format!("💬 {}", user.username),
         //avatar_url: user.avatar.as_ref().map(|avatar_hash| format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
         avatar_url: None,
     };
