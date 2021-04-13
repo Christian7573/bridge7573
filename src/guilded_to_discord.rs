@@ -80,7 +80,9 @@ struct ChatMessageCreated {
 struct GuildedMessage {
     #[serde(rename = "type")]
     msg_type: String,
-    content: GuildedMessageContent    
+    content: GuildedMessageContent,
+    #[serde(rename = "webhookId")]
+    webhook_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,6 +123,7 @@ fn extract_text_from_node(node: &JsValue, out: &mut String) {
 
 
 async fn chat_message_created(env: &Arc<Environment>, data: &mut Data, msg: ChatMessageCreated) {
+    if msg.message.webhook_id.is_some() { return };
     let discord_channel = if let Some(c) = get_linked_discord_channel(env, data, &msg.channel_id) { c } else { return };
     let mut content = String::new();
     extract_text_from_node(&msg.message.content.document, &mut content);
