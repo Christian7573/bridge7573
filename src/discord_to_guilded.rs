@@ -65,6 +65,7 @@ struct DiscordMessage {
     channel_id: String,
     author: DiscordUser,
     webhook_id: Option<String>,
+    content: Option<String>,
 }
 #[derive(Deserialize)]
 struct DiscordUser {
@@ -74,13 +75,23 @@ struct DiscordUser {
 }
 
 async fn message_created(env: &Arc<Environment>, data: &mut Data, msg: DiscordMessage) {
-    if msg.webhook_id.is_some() { return };
+    if msg.webhook_id.is_some() || msg.content.is_none() { return };
     let guilded_channel = if let Some(c) = get_linked_guilded_channel(env, data, &msg.channel_id) { c } else { return };
     let webhook = match get_webhook(env, data, &msg.author, guilded_channel).await {
         Ok(w) => w, 
         Err(err) => { eprintln!("GD Chat Message Get Webhook: {:?}", err); return; }
     };
-    
+
+    #[derive(Serialize)]
+    struct ToWebhook {
+        content: String,
+    }
+    let body = ToWebhook {
+        content: msg.content.unwrap()
+    };
+    let response = surf::post(webhook)
+        .header("Content-Type", "application/json")
+        .body(surf::Body::from_json(&body).expect("How did we get here?")).await;
 }
 
 fn get_linked_guilded_channel<'e>(env: &'e Arc<Environment>, _data: &mut Data, discord_channel: &str) -> Option<&'e str> {
@@ -93,15 +104,49 @@ async fn get_webhook(env: &Arc<Environment>, data: &mut Data, user: &DiscordUser
     let channel = data.webhooks.get_mut(guilded_channel).unwrap();
     if let Some(webhook) = channel.get(&user.id) { return Ok(webhook.to_owned()) };
 
-    let avatar = if let Some(avatar_hash) = user.avatar.as_ref() {
+    /*let avatar = if let Some(avatar_hash) = user.avatar.as_ref() {
         let mut response = surf::get(format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
             .send().await?;
         if !response.status().is_success() { return Err(format!("DG Make Webhook: Failed to get avatar for user {}: {}", user.id, response.status()).into()) };
         let bytes = response.body_bytes().await?;
         todo!()
-    } else { None };
+    } else { None };*/
 
+    #[derive(Serialize)]
+    struct CreateWebhookBody {
+        #[serde(rename="channelId")]
+        channel: String,
+        name: String,
+        #[serde(rename="iconUrl")]
+        avatar_url: Option<String>,
+    }
+    let body = CreateWebhookBody {
+        channel: guilded_channel.to_owned(),
+        name: user.username.to_owned(),
+        //avatar_url: user.avatar.as_ref().map(|avatar_hash| format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
+        avatar_url: None,
+    };
 
+    let mut response = surf::post(format!("{}/webhooks", GUILDED_API))
+        .header("Content-Type", "application/json")
+        .header("Cookie", &env.guilded_cookies)
+        .body(surf::Body::from_json(&body)?).await?;
+    if !response.status().is_success() { return Err(format!("DG Make Webhook: Failed to make webhook for user {} in channel {}: {}", user.id, guilded_channel, response.status()).into()) };
 
-    todo!()
+    #[derive(Deserialize)]
+    struct CreateWebhookResponse {
+        id: String,
+        token: String,
+    }
+    let webhook = response.body_json::<CreateWebhookResponse>().await?;
+    let webhook = format!("https://media.guilded.gg/webhooks/{}/{}", webhook.id, webhook.token);
+    data.webhooks.get_mut(guilded_channel).unwrap().insert(user.id.to_owned(), webhook.clone());        
+    data.save().await;
+    Ok(webhook)
 }
+
+/*async fn upload_avatar(env: &Arc<Environment>, data: &mut Data, png_bytes: &[u8]) -> Result<String, ErrorBox> {
+ * guilded media uploads are wack
+    
+    todo!()
+}*/
