@@ -67,7 +67,7 @@ struct DiscordMessage {
     webhook_id: Option<String>,
     content: Option<String>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct DiscordUser {
     id: String,
     username: String,
@@ -104,13 +104,6 @@ async fn get_webhook(env: &Arc<Environment>, data: &mut Data, user: &DiscordUser
     let channel = data.webhooks.get_mut(guilded_channel).unwrap();
     if let Some(webhook) = channel.get(&user.id) { return Ok(webhook.to_owned()) };
 
-    /*let avatar = if let Some(avatar_hash) = user.avatar.as_ref() {
-        let mut response = surf::get(format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
-            .send().await?;
-        if !response.status().is_success() { return Err(format!("DG Make Webhook: Failed to get avatar for user {}: {}", user.id, response.status()).into()) };
-        let bytes = response.body_bytes().await?;
-        todo!()
-    } else { None };*/
 
     #[derive(Serialize)]
     struct CreateWebhookBody {
@@ -120,10 +113,9 @@ async fn get_webhook(env: &Arc<Environment>, data: &mut Data, user: &DiscordUser
         #[serde(rename="iconUrl")]
         avatar_url: Option<String>,
     }
-    let body = CreateWebhookBody {
+    let mut body = CreateWebhookBody {
         channel: guilded_channel.to_owned(),
         name: format!("💬 {}", user.username),
-        //avatar_url: user.avatar.as_ref().map(|avatar_hash| format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
         avatar_url: None,
     };
 
@@ -139,14 +131,65 @@ async fn get_webhook(env: &Arc<Environment>, data: &mut Data, user: &DiscordUser
         token: String,
     }
     let webhook = response.body_json::<CreateWebhookResponse>().await?;
+    let my_id = webhook.id.to_owned();
     let webhook = format!("https://media.guilded.gg/webhooks/{}/{}", webhook.id, webhook.token);
     data.webhooks.get_mut(guilded_channel).unwrap().insert(user.id.to_owned(), webhook.clone());        
     data.save().await;
+
+    //Add avatar
+    let env = env.clone();
+    let user = user.clone();
+    async_std::task::spawn(async move {
+        let avatar = if let Some(avatar_hash) = user.avatar.as_ref() {
+            match surf::get(format!("https://cdn.discordapp.com/avatars/{}/{}.png?size=512", user.id, avatar_hash))
+                .send().await {
+                Ok(mut response) => {
+                    if !response.status().is_success() { eprintln!("DG Make Webhook: Failed to get avatar for user {}: {}", user.id, response.status()); None }
+                    else {
+                        match response.body_bytes().await {
+                            Ok(bytes) => {
+                                match upload_avatar(&env, format!("avatar_{}.png", user.id), &bytes).await {
+                                    Ok(url) => Some(url),
+                                    Err(err) => { eprintln!("{}", err); None }
+                                }
+                            }, 
+                            Err(err) => { eprintln!("{}", err); None }
+                        }
+                    }
+                },
+                Err(err) => { eprintln!("{}", err); None }
+            }
+        } else { None };
+
+        if avatar.is_some() {
+            body.avatar_url = avatar;
+            let mut response = surf::put(format!("{}/webhooks/{}", GUILDED_API, my_id))
+                .header("Content-Type", "application/json")
+                .header("Cookie", &env.guilded_cookies)
+                .body(surf::Body::from_json(&body).expect("How did we get here?")).await;
+        }
+    });
+
     Ok(webhook)
 }
 
-/*async fn upload_avatar(env: &Arc<Environment>, data: &mut Data, png_bytes: &[u8]) -> Result<String, ErrorBox> {
- * guilded media uploads are wack
-    
-    todo!()
-}*/
+async fn upload_avatar(env: &Arc<Environment>, png_name: String, png_bytes: &[u8]) -> Result<String, ErrorBox> {
+    const BOUNDARY: &'static str = "----WebKitFormBoundaryPfRexPAQMB4xRmqq";
+    let mut body = format!("--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: image/png\r\n\r\n", BOUNDARY, png_name).as_bytes().to_vec();
+    body.extend_from_slice(png_bytes);
+    body.extend_from_slice(format!("\r\n--{}--", BOUNDARY).as_bytes());
+
+    let mut response = surf::post("https://media.guilded.gg/media/upload?dynamicMediaTypeId=UserAvatar".to_owned())
+        .header("Cookie", &env.guilded_cookies)
+        .header("Content-Type", format!("multipart/form-data; boundary={}", BOUNDARY))
+        .body(surf::Body::from_bytes(body)).await?;
+    if !response.status().is_success() { return Err(format!("DG: Failed to upload media: {}\n{:?}", response.status(), response.body_string().await).into()) }
+
+    #[derive(Deserialize)]
+    struct Response {
+        url: String
+    }
+    let response = response.body_json::<Response>().await?;
+    println!("{}", response.url);
+    Ok(response.url)
+}
