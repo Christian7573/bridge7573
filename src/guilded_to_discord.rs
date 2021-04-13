@@ -40,7 +40,6 @@ pub(crate) async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: 
 
     async_std::task::spawn(async move {
         while let Some(msg) = from_guilded.next().await {
-            println!("Hallo first");
             if let WsMessage::Text(msg) = &*msg {
                 if print_all_msg { println!("{}", msg) };
                 if let Some(json_begin_at) = msg.find('[') {
