@@ -26,6 +26,12 @@ impl Data {
     }
 }
 
+lazy_static::lazy_static! {
+    static ref ALLOWED_MENTIONS_NONE: JsValue = {
+        serde_json::json!( {"parse": []} )
+    };
+}
+
 pub(crate) async fn guilded_to_discord(env: Arc<Environment>, mut from_guilded: MultiRecv<WsMessage>) -> async_std::task::JoinHandle<()> {
     let mut data = Data::default();
     if let Ok(mut data_file) = File::open(DATA_FILE).await {
@@ -134,9 +140,11 @@ async fn chat_message_created(env: &Arc<Environment>, data: &mut Data, msg: Chat
     #[derive(Serialize, Deserialize)]
     struct WebhookMessage {
         content: String,
+        allowed_mentions: JsValue,
     }
     let body = WebhookMessage {
-        content
+        content,
+        allowed_mentions: ALLOWED_MENTIONS_NONE.clone()
     };
     let response = surf::post(webhook)
         .header("Content-Type", "application/json")
