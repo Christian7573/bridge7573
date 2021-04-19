@@ -66,12 +66,18 @@ struct DiscordMessage {
     author: DiscordUser,
     webhook_id: Option<String>,
     content: Option<String>,
+    attachments: Vec<DiscordAttachment>
 }
 #[derive(Deserialize, Clone)]
 struct DiscordUser {
     id: String,
     username: String,
     avatar: Option<String>,
+}
+#[derive(Deserialize)]
+struct DiscordAttachment {
+    proxy_url: String,
+    filename: String,
 }
 
 async fn message_created(env: &Arc<Environment>, data: &mut Data, msg: DiscordMessage) {
@@ -82,12 +88,15 @@ async fn message_created(env: &Arc<Environment>, data: &mut Data, msg: DiscordMe
         Err(err) => { eprintln!("GD Chat Message Get Webhook: {:?}", err); return; }
     };
 
+    let mut content = msg.content.unwrap();
+    if !msg.attachments.is_empty() { content.extend(msg.attachments.iter().map(|attachment| format!("\n{}: {}", attachment.filename, attachment.proxy_url))) };
+
     #[derive(Serialize)]
     struct ToWebhook {
         content: String,
     }
     let body = ToWebhook {
-        content: msg.content.unwrap()
+        content
     };
     let response = surf::post(webhook)
         .header("Content-Type", "application/json")
